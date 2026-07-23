@@ -22,6 +22,7 @@ from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -45,6 +46,7 @@ app.add_middleware(
     allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
     allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=512)
 
 STORE, STORE_KIND = get_store()
 
