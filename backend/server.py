@@ -8,52 +8,72 @@ Endpoints
   POST /api/admin/login                 -> placement-team login -> bearer token
   GET  /api/admin/candidates            -> Student Arsenal directory (auth)
   GET  /api/admin/candidates/{id}       -> single candidate record (auth)
-  GET  /api/health
+  GET  /api/admin/resume/{id}           -> original resume PDF (auth)
+  GET  /api/health                      -> liveness + DB connectivity
+
+Persistence is PostgreSQL only (see database/, models/, repositories/,
+services/) — routes here are thin: parse the request, delegate to
+CandidateService, return its result. No SQL and no file I/O happens
+directly in this module.
 """
 from __future__ import annotations
-import os
-import uuid
-import hmac
-import time
+
 import base64
 import hashlib
-import datetime as dt
+import hmac
+import logging
+import time
+import uuid
+from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Header
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import playbook as PB
-from pdf_extract import extract_resume, extract_from_text
-from rule_engine import audit
-from store import get_store
+from config import settings
+from database import check_connection, get_session
+from pdf_extract import extract_from_text
+from rule_engine import audit as run_rule_engine
+from services import CandidateService
 
-# --- config ---------------------------------------------------------------
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@placement.team")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "playbook2026")
-SECRET = os.getenv("SECRET_KEY", "change-me-in-prod").encode()
-TOKEN_TTL = 24 * 3600  # 24h
-MAX_BYTES = 5 * 1024 * 1024
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "data", "resumes")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+logging.basicConfig(
+    level=settings.log_level,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+)
+logger = logging.getLogger("resume_playbook.server")
 
-app = FastAPI(title="Resume Playbook Diagnostic API", version="1.0.0")
+SECRET = settings.secret_key.encode()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if await check_connection():
+        logger.info("Database connection OK (%s)", settings.environment)
+    else:
+        logger.error(
+            "Database is unreachable at startup. Check DATABASE_URL and that "
+            "migrations have been applied (`alembic upgrade head`)."
+        )
+    yield
+
+
+app = FastAPI(title="Resume Playbook Diagnostic API", version="2.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=512)
 
-STORE, STORE_KIND = get_store()
-
 
 # --- token helpers (stateless HMAC, no external dep) ----------------------
 def make_token(email: str) -> str:
-    exp = int(time.time()) + TOKEN_TTL
+    exp = int(time.time()) + settings.token_ttl_seconds
     payload = f"{email}|{exp}".encode()
     sig = hmac.new(SECRET, payload, hashlib.sha256).digest()
     return base64.urlsafe_b64encode(payload + b"." + sig).decode()
@@ -80,6 +100,10 @@ async def require_admin(authorization: Optional[str] = Header(None)):
     return True
 
 
+def get_candidate_service(session: AsyncSession = Depends(get_session)) -> CandidateService:
+    return CandidateService(session, settings.upload_dir_abs)
+
+
 # --- models ---------------------------------------------------------------
 class LoginBody(BaseModel):
     email: str
@@ -97,7 +121,8 @@ class TextAuditBody(BaseModel):
 # --- routes ---------------------------------------------------------------
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "store": STORE_KIND, "roles": len(PB.ROLE_KEYWORDS)}
+    db_ok = await check_connection()
+    return {"ok": db_ok, "store": "postgresql", "roles": len(PB.ROLE_KEYWORDS)}
 
 
 @app.get("/api/roles")
@@ -125,100 +150,82 @@ async def run_audit(
     skills: str = Form(""),
     linkedin: str = Form(""),
     github: str = Form(""),
+    service: CandidateService = Depends(get_candidate_service),
 ):
     data = await resumeFile.read()
-    if len(data) > MAX_BYTES:
+    if len(data) > settings.max_upload_bytes:
         raise HTTPException(413, "File exceeds 5MB limit")
     if not resumeFile.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF resumes are accepted")
+
     try:
-        extracted = extract_resume(data)
+        candidate_id, result = await service.run_and_save_audit(
+            file_bytes=data,
+            file_name=resumeFile.filename,
+            target_role=targetRole,
+            experience_level=experienceLevel,
+            profile={
+                "fullName": fullName, "email": email, "phone": phone,
+                "location": location, "college": college, "degree": degree,
+                "branch": branch, "gradYear": gradYear, "cgpa": cgpa,
+                "skills": skills, "linkedin": linkedin, "github": github,
+            },
+        )
     except Exception as e:
+        logger.exception("Audit failed for upload %s", resumeFile.filename)
         raise HTTPException(422, f"Could not parse PDF: {e}")
 
-    result = audit(extracted, targetRole, experienceLevel, resumeFile.filename)
-
-    rec_id = str(uuid.uuid4())
-    # persist the raw file
-    safe_name = f"{rec_id}.pdf"
-    with open(os.path.join(UPLOAD_DIR, safe_name), "wb") as f:
-        f.write(data)
-
-    record = {
-        "id": rec_id,
-        "createdAt": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-        "profile": {
-            "fullName": fullName, "email": email, "phone": phone,
-            "location": location, "college": college, "degree": degree,
-            "branch": branch, "gradYear": gradYear, "cgpa": cgpa,
-            "targetRole": targetRole, "experienceLevel": experienceLevel,
-            "skills": [s.strip() for s in skills.split(",") if s.strip()],
-            "socials": {"linkedin": linkedin, "github": github},
-        },
-        "resumeArtifact": {
-            "fileName": resumeFile.filename,
-            "fileUrl": f"/api/admin/resume/{rec_id}",
-            "rawExtractedText": extracted.raw_text,
-        },
-        "auditResult": result,
-    }
-    await STORE.insert(record)
-    return {"id": rec_id, "auditResult": result}
+    return {"id": str(candidate_id), "auditResult": result}
 
 
 @app.post("/api/audit/text")
 async def run_audit_text(body: TextAuditBody):
     extracted = extract_from_text(body.resumeText)
-    result = audit(extracted, body.targetRole, body.experienceLevel, "pasted.txt")
+    result = run_rule_engine(extracted, body.targetRole, body.experienceLevel, "pasted.txt")
     return {"auditResult": result}
 
 
 @app.post("/api/admin/login")
 async def admin_login(body: LoginBody):
-    if body.email.strip().lower() == ADMIN_EMAIL.lower() and body.password == ADMIN_PASSWORD:
-        return {"token": make_token(body.email), "expiresIn": TOKEN_TTL}
+    if body.email.strip().lower() == settings.admin_email.lower() and body.password == settings.admin_password:
+        return {"token": make_token(body.email), "expiresIn": settings.token_ttl_seconds}
     raise HTTPException(401, "Invalid credentials")
 
 
 @app.get("/api/admin/candidates")
-async def list_candidates(_: bool = Depends(require_admin)):
-    rows = await STORE.list_all()
-    # summarize for the directory table
-    summary = [{
-        "id": r["id"],
-        "createdAt": r["createdAt"],
-        "fullName": r["profile"]["fullName"] or "(unnamed)",
-        "email": r["profile"]["email"],
-        "college": r["profile"]["college"],
-        "targetRole": r["profile"]["targetRole"],
-        "experienceLevel": r["profile"]["experienceLevel"],
-        "overallScore": r["auditResult"]["overallScore"],
-        "atsRiskLevel": r["auditResult"]["atsRiskLevel"],
-        "recruiter7SecScan": r["auditResult"]["recruiter7SecScan"],
-    } for r in rows]
+async def list_candidates(
+    _: bool = Depends(require_admin),
+    service: CandidateService = Depends(get_candidate_service),
+):
+    summary = await service.list_summaries()
     return {"count": len(summary), "candidates": summary}
 
 
-@app.get("/api/admin/candidates/{rec_id}")
-async def get_candidate(rec_id: str, _: bool = Depends(require_admin)):
-    rec = await STORE.get(rec_id)
+@app.get("/api/admin/candidates/{candidate_id}")
+async def get_candidate(
+    candidate_id: uuid.UUID,
+    _: bool = Depends(require_admin),
+    service: CandidateService = Depends(get_candidate_service),
+):
+    rec = await service.get_detail(candidate_id)
     if not rec:
         raise HTTPException(404, "Not found")
     return rec
 
 
-@app.get("/api/admin/resume/{rec_id}")
-async def get_resume_file(rec_id: str, _: bool = Depends(require_admin)):
-    rec = await STORE.get(rec_id)
-    if not rec:
+@app.get("/api/admin/resume/{candidate_id}")
+async def get_resume_file(
+    candidate_id: uuid.UUID,
+    _: bool = Depends(require_admin),
+    service: CandidateService = Depends(get_candidate_service),
+):
+    found = await service.get_resume_path(candidate_id)
+    if not found:
         raise HTTPException(404, "Not found")
-    path = os.path.join(UPLOAD_DIR, f"{rec_id}.pdf")
-    if not os.path.isfile(path):
-        raise HTTPException(404, "Resume file not found")
-    file_name = rec.get("resumeArtifact", {}).get("fileName", "resume.pdf")
-    return FileResponse(path, media_type="application/pdf", filename=file_name)
+    storage_path, file_name = found
+    return FileResponse(storage_path, media_type="application/pdf", filename=file_name)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=True)
+    uvicorn.run("server:app", host="0.0.0.0", port=settings.port, reload=settings.environment == "development")

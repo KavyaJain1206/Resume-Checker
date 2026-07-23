@@ -1,0 +1,34 @@
+[Unit]
+Description=Resume Playbook Diagnostic API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=resume_playbook
+Group=resume_playbook
+WorkingDirectory=/opt/resume-playbook-diagnostic/backend
+EnvironmentFile=/opt/resume-playbook-diagnostic/backend/.env
+
+# Plain multi-worker uvicorn is sufficient at this app's scale. If/when you
+# outgrow it, swap this for gunicorn -k uvicorn.workers.UvicornWorker for
+# better worker lifecycle management — not needed yet.
+ExecStart=/opt/resume-playbook-diagnostic/backend/.venv/bin/uvicorn server:app \
+  --host 0.0.0.0 --port 8000 --workers 4
+
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=resume-playbook-api
+
+# --- hardening --------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/resume-playbook-diagnostic/backend/data
+
+[Install]
+WantedBy=multi-user.target

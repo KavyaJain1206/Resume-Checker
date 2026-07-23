@@ -12,25 +12,33 @@ Two surfaces:
 3. **Placement Admin → Student Arsenal** (`/arsenal`) — gated candidate directory.
 
 Stack: **React + TypeScript + Tailwind + Framer Motion + Lucide** (frontend) ·
-**FastAPI + pdfplumber** with a **MongoDB or zero-config JSON** store (backend).
+**FastAPI + pdfplumber + PostgreSQL** via SQLAlchemy 2.x async / asyncpg / Alembic (backend).
 Deterministic rule engine — no LLM, same resume always yields the same score.
 
 ---
 
 ## Quick start
 
-### 1. Backend
+### 1. Database
+Create a dedicated role + database (see `backend/.env.example` for the expected shape):
+```sql
+CREATE ROLE resume_app WITH LOGIN PASSWORD 'choose-a-password';
+CREATE DATABASE resume_playbook OWNER resume_app;
+```
+
+### 2. Backend
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate      # optional
 pip install -r requirements.txt
-cp .env.example .env                                    # optional; JSON store works with no edits
+cp .env.example .env                                    # then set DATABASE_URL
+alembic upgrade head                                    # creates the schema — never done at app startup
 python server.py                                        # -> http://localhost:8000
 ```
-Leave `MONGO_URL` blank to use the built-in JSON file store (`backend/data/arsenal.json`).
-Set it (e.g. `mongodb://localhost:27017`) to use MongoDB instead.
+`GET /api/health` reports live DB connectivity. See `backend/deploy/` for the
+production (systemd + gunicorn) setup.
 
-### 2. Frontend
+### 3. Frontend
 ```bash
 cd frontend
 npm install
@@ -70,6 +78,8 @@ detection via word coordinates) so ATS checks reflect the real file, not just te
 | POST | `/api/admin/login` | placement-team login → bearer token |
 | GET | `/api/admin/candidates` | directory (auth) |
 | GET | `/api/admin/candidates/{id}` | full record (auth) |
+| GET | `/api/admin/resume/{id}` | original resume PDF (auth) |
+| GET | `/api/health` | liveness + DB connectivity |
 
 ## Notes
 - Output matches the dashboard JSON contract (`overallScore`, `categoryScores`,
