@@ -11,12 +11,14 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import AuditFinding, Candidate
 from pdf_extract import ExtractedResume, extract_from_text, extract_resume
 from repositories import CandidateRepository
+from jd_match_engine import DEGREE_RE, EMAIL_RE, GITHUB_RE, LINKEDIN_RE, PHONE_RE, _extract_name as infer_resume_name
 from rule_engine import audit as run_rule_engine
 
 
@@ -26,6 +28,38 @@ def parse_skills(raw: str) -> list[str]:
 
 def _iso_z(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _display_name(full_name: str, raw_extracted_text: str = "") -> str:
+    name = full_name.strip()
+    if name:
+        return name
+    inferred = infer_resume_name(raw_extracted_text.splitlines()) if raw_extracted_text else None
+    return inferred or "(unnamed)"
+
+
+def _infer_optional_profile(raw_extracted_text: str) -> dict:
+    text = raw_extracted_text or ""
+    email_m = EMAIL_RE.search(text)
+    phone_m = PHONE_RE.search(text)
+    linkedin_m = LINKEDIN_RE.search(text)
+    github_m = GITHUB_RE.search(text)
+    degree_m = DEGREE_RE.search(text)
+    skills_zone = ""
+    lower = text.lower()
+    if "skills" in lower:
+        after_skills = lower.split("skills", 1)[1]
+        skills_zone = after_skills.split("education", 1)[0].split("experience", 1)[0].split("projects", 1)[0]
+    skills = [s.strip(" •-*\t\r\n") for s in re.split(r"[,/|;\n]", skills_zone) if s.strip(" •-*\t\r\n")]
+    skills = [s for s in skills if 1 < len(s) <= 40]
+    return {
+        "email": email_m.group(0) if email_m else "",
+        "phone": phone_m.group(0).strip() if phone_m else "",
+        "linkedin": linkedin_m.group(0) if linkedin_m else "",
+        "github": github_m.group(0) if github_m else "",
+        "degree": degree_m.group(0).strip() if degree_m else "",
+        "skills": skills[:12],
+    }
 
 
 def _finding_to_dict(f: AuditFinding) -> dict:
@@ -92,10 +126,11 @@ class CandidateService:
         summaries = []
         for c in candidates:
             latest = c.audit_results[0] if c.audit_results else None
+            raw_text = c.resume_upload.raw_extracted_text if c.resume_upload else ""
             summaries.append({
                 "id": str(c.id),
                 "createdAt": _iso_z(c.created_at),
-                "fullName": c.full_name or "(unnamed)",
+                "fullName": _display_name(c.full_name, raw_text),
                 "email": c.email,
                 "college": c.college,
                 "targetRole": c.target_role,
@@ -114,16 +149,25 @@ class CandidateService:
         findings = latest.findings if latest else []
         critical = [_finding_to_dict(f) for f in findings if f.severity == "critical"]
         important = [_finding_to_dict(f) for f in findings if f.severity == "important"]
+        raw_text = c.resume_upload.raw_extracted_text if c.resume_upload else ""
+        inferred = _infer_optional_profile(raw_text)
         return {
             "id": str(c.id),
             "createdAt": _iso_z(c.created_at),
             "profile": {
-                "fullName": c.full_name, "email": c.email, "phone": c.phone,
-                "location": c.location, "college": c.college, "degree": c.degree,
+                "fullName": _display_name(c.full_name, raw_text),
+                "email": c.email or inferred["email"],
+                "phone": c.phone or inferred["phone"],
+                "location": c.location,
+                "college": c.college,
+                "degree": c.degree or inferred["degree"],
                 "branch": c.branch, "gradYear": c.grad_year, "cgpa": c.cgpa,
                 "targetRole": c.target_role, "experienceLevel": c.experience_level,
-                "skills": [s.skill for s in c.skills],
-                "socials": {"linkedin": c.linkedin_url, "github": c.github_url},
+                "skills": [s.skill for s in c.skills] or inferred["skills"],
+                "socials": {
+                    "linkedin": c.linkedin_url or inferred["linkedin"],
+                    "github": c.github_url or inferred["github"],
+                },
             },
             "resumeArtifact": {
                 "fileName": c.resume_upload.file_name if c.resume_upload else "",

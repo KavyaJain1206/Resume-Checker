@@ -5,15 +5,41 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pdf_extract import ExtractedResume
 from repositories.jd_match_repository import JdMatchRepository
+from jd_match_engine import DEGREE_RE, EMAIL_RE, GITHUB_RE, LINKEDIN_RE, PHONE_RE
 
 
 def _iso_z(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _infer_optional_profile(raw_extracted_text: str) -> dict:
+    text = raw_extracted_text or ""
+    email_m = EMAIL_RE.search(text)
+    phone_m = PHONE_RE.search(text)
+    linkedin_m = LINKEDIN_RE.search(text)
+    github_m = GITHUB_RE.search(text)
+    degree_m = DEGREE_RE.search(text)
+    lower = text.lower()
+    skills_zone = ""
+    if "skills" in lower:
+        after_skills = lower.split("skills", 1)[1]
+        skills_zone = after_skills.split("education", 1)[0].split("experience", 1)[0].split("projects", 1)[0]
+    skills = [s.strip(" •-*\t\r\n") for s in re.split(r"[,/|;\n]", skills_zone) if s.strip(" •-*\t\r\n")]
+    skills = [s for s in skills if 1 < len(s) <= 40]
+    return {
+        "email": email_m.group(0) if email_m else "",
+        "phone": phone_m.group(0).strip() if phone_m else "",
+        "linkedin": linkedin_m.group(0) if linkedin_m else "",
+        "github": github_m.group(0) if github_m else "",
+        "degree": degree_m.group(0).strip() if degree_m else "",
+        "skills": skills[:12],
+    }
 
 
 class JdMatchService:
@@ -78,9 +104,29 @@ class JdMatchService:
         if analysis is None:
             return None
         payload = analysis.analysis_json or {}
+        optional_profile = payload.get("optionalProfile") or {}
+        inferred = _infer_optional_profile(analysis.resume_raw_extracted_text)
+        profile_name = payload.get("candidateName") or "(unnamed)"
+        skills = optional_profile.get("skills") or inferred["skills"]
         return {
             "id": str(analysis.id),
             "createdAt": _iso_z(analysis.created_at),
+            "profile": {
+                "fullName": profile_name,
+                "email": optional_profile.get("email") or inferred["email"] or None,
+                "phone": optional_profile.get("phone") or inferred["phone"] or None,
+                "location": None,
+                "college": None,
+                "degree": optional_profile.get("degree") or inferred["degree"] or None,
+                "branch": None,
+                "gradYear": None,
+                "cgpa": None,
+                "skills": skills,
+                "socials": {
+                    "linkedin": optional_profile.get("linkedin") or inferred["linkedin"] or None,
+                    "github": optional_profile.get("github") or inferred["github"] or None,
+                },
+            },
             "resumeArtifact": {
                 "fileName": analysis.resume_file_name,
                 "fileUrl": f"/api/admin/jd-match-resume/{analysis.id}",

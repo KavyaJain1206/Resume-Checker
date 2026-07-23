@@ -83,6 +83,22 @@ export interface JdMatchSummary {
 export interface JdMatchDetail {
   id: string;
   createdAt: string;
+  profile: {
+    fullName: string;
+    email?: string | null;
+    phone?: string | null;
+    location?: string | null;
+    college?: string | null;
+    degree?: string | null;
+    branch?: string | null;
+    gradYear?: string | null;
+    cgpa?: string | null;
+    skills: string[];
+    socials: {
+      linkedin?: string | null;
+      github?: string | null;
+    };
+  };
   resumeArtifact: {
     fileName: string;
     fileUrl: string;

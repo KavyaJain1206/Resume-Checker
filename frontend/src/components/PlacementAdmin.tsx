@@ -358,7 +358,7 @@ function JdDetailDrawer({ rec, token, onClose, onSessionExpired }: {
       <motion.div initial={{ x: 400 }} animate={{ x: 0 }} onClick={(e) => e.stopPropagation()}
         className="w-full max-w-lg bg-white h-full overflow-y-auto border-l-4 border-flame p-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-900">JD Match</h2>
+          <h2 className="text-2xl font-900">{rec.profile.fullName || "(unnamed)"}</h2>
           <button onClick={onClose} className="mono-label hover:text-flame">Close ✕</button>
         </div>
         <p className="text-sm text-smoke mt-1">{rec.resumeArtifact.fileName} · {new Date(rec.createdAt).toLocaleString()}</p>
@@ -367,6 +367,24 @@ function JdDetailDrawer({ rec, token, onClose, onSessionExpired }: {
           <Stat k="ATS" v={a.resumeAtsScore} />
           <Stat k="Rec" v={a.finalRecommendation} />
         </div>
+        <Section title="Contact">
+          <KV k="Email" v={rec.profile.email || "—"} />
+          <KV k="Phone" v={rec.profile.phone || "—"} />
+          <KV k="Location" v={rec.profile.location || "—"} />
+          <KV k="LinkedIn" v={rec.profile.socials.linkedin || "—"} />
+          <KV k="GitHub" v={rec.profile.socials.github || "—"} />
+        </Section>
+        <Section title="Academics">
+          <KV k="College" v={rec.profile.college || "—"} />
+          <KV k="Degree" v={rec.profile.degree || "—"} />
+          <KV k="Grad Year" v={rec.profile.gradYear || "—"} />
+          <KV k="CGPA" v={rec.profile.cgpa || "—"} />
+        </Section>
+        <Section title="Skills">
+          <div className="flex flex-wrap gap-2">
+            {rec.profile.skills.length ? rec.profile.skills.map((s) => <span key={s} className="text-xs border border-ink/30 px-2 py-0.5">{s}</span>) : <span className="text-xs text-smoke">—</span>}
+          </div>
+        </Section>
         <Section title="Files">
           <KV k="Resume" v={rec.resumeArtifact.fileName} />
           <KV k="JD" v={rec.jdArtifact.fileName} />
@@ -378,6 +396,24 @@ function JdDetailDrawer({ rec, token, onClose, onSessionExpired }: {
         </Section>
         <Section title="Analysis">
           <p className="text-sm text-ink/80 leading-relaxed whitespace-pre-wrap">{JSON.stringify(a.scoreBreakdown, null, 2)}</p>
+        </Section>
+        <Section title={`Critical Fixes (${a.criticalFixes.length})`}>
+          {a.criticalFixes.length > 0
+            ? a.criticalFixes.map((f) => (
+                <div key={f.id} className="text-sm mb-2 border-l-2 border-red-500 pl-3">
+                  <b>{f.title}</b><div className="text-smoke text-xs">{f.description}</div>
+                </div>
+              ))
+            : <span className="text-xs text-smoke">None 🎉</span>}
+        </Section>
+        <Section title={`Important Tweaks (${a.importantTweaks.length})`}>
+          {a.importantTweaks.length > 0
+            ? a.importantTweaks.map((f) => (
+                <div key={f.id} className="text-sm mb-2 border-l-2 border-orange-500 pl-3">
+                  <b>{f.title}</b><div className="text-smoke text-xs">{f.description}</div>
+                </div>
+              ))
+            : <span className="text-xs text-smoke">None 🎉</span>}
         </Section>
         <div className="grid grid-cols-2 gap-3">
           <button

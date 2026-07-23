@@ -92,7 +92,10 @@ class CandidateRepository:
         build the directory table (avoids N+1 on audit_results)."""
         stmt = (
             select(Candidate)
-            .options(selectinload(Candidate.audit_results))
+            .options(
+                selectinload(Candidate.audit_results),
+                selectinload(Candidate.resume_upload),
+            )
             .order_by(Candidate.created_at.desc())
         )
         result = await self.session.execute(stmt)
