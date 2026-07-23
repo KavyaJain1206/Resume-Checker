@@ -56,24 +56,26 @@ export default function IntakePortal({
     if (mode === "form" && !profile.fullName)
       return setError("Enter your name for the tailored audit.");
     setLoading(true);
-    const fd = new FormData();
-    fd.append("resumeFile", file);
-    fd.append("targetRole", profile.targetRole);
-    fd.append("experienceLevel", profile.experienceLevel);
-    (["fullName", "email", "phone", "location", "college", "degree", "branch",
-      "gradYear", "cgpa", "skills", "linkedin", "github"] as (keyof Profile)[])
-      .forEach((k) => fd.append(k === "gradYear" ? "gradYear" : k, profile[k]));
     const MIN_LOADING_MS = 2500;
     const started = Date.now();
     try {
+      const fd = new FormData();
+      fd.append("resumeFile", file);
+      fd.append("targetRole", profile.targetRole);
+      fd.append("experienceLevel", profile.experienceLevel);
+      (["fullName", "email", "phone", "location", "college", "degree", "branch",
+        "gradYear", "cgpa", "skills", "linkedin", "github"] as (keyof Profile)[])
+        .forEach((k) => fd.append(k, profile[k]));
+
       const { auditResult } = await runAudit(fd);
       const remaining = MIN_LOADING_MS - (Date.now() - started);
       if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
       onComplete(auditResult, profile);
     } catch (e: any) {
+      console.error("[IntakePortal.submit] audit request failed:", e);
       const remaining = MIN_LOADING_MS - (Date.now() - started);
       if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
-      setError(e.message || "Something went wrong. Is the backend running?");
+      setError(e?.message || "Something went wrong. Is the backend running?");
     } finally {
       setLoading(false);
     }

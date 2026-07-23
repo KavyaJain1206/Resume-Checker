@@ -9,10 +9,30 @@ export async function getRoles(): Promise<{ roles: string[]; experienceLevels: s
 }
 
 export async function runAudit(form: FormData): Promise<{ id: string; auditResult: AuditResult }> {
-  const r = await fetch(`${BASE}/api/audit`, { method: "POST", body: form });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
+  let r: Response;
+  try {
+    r = await fetch(`${BASE}/api/audit`, { method: "POST", body: form, signal: controller.signal });
+  } catch (err: any) {
+    console.error("[runAudit] fetch() rejected before a response was received:", err);
+    if (err?.name === "AbortError") {
+      throw new Error("Upload timed out — check your connection and try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!r.ok) {
-    const e = await r.json().catch(() => ({ detail: "Audit failed" }));
-    throw new Error(e.detail || "Audit failed");
+    const bodyText = await r.text();
+    let detail = "Audit failed";
+    try {
+      detail = JSON.parse(bodyText).detail || detail;
+    } catch (parseErr) {
+      console.error("[runAudit] non-JSON error response", { status: r.status, bodyText, parseErr });
+    }
+    console.error(`[runAudit] server responded ${r.status}:`, detail);
+    throw new Error(detail);
   }
   return r.json();
 }
