@@ -8,4 +8,4 @@ backend/data/
 .DS_Store
 *.tsbuildinfo
 
-.claude
+.claude/
