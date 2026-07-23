@@ -39,60 +39,76 @@ def _new_id(prefix: str, n: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Parsing helpers
+# Parsing helpers — module-level and parameterized (by heading_map) so any
+# caller can reuse section/bullet detection against a different heading
+# vocabulary, e.g. jd_match_engine.py parsing a job description instead of
+# a resume. ParsedResume below is a thin, behavior-preserving wrapper around
+# these for the existing resume-audit flow.
 # ---------------------------------------------------------------------------
+def is_heading(line: str, heading_map: Dict[str, List[str]]) -> Optional[str]:
+    s = line.strip().lower().strip(":").strip()
+    if len(s) > 40 or len(s.split()) > 5:
+        return None
+    for canon, variants in heading_map.items():
+        for v in variants:
+            if s == v or s.startswith(v):
+                return canon
+    return None
+
+
+def detect_sections(lines: List[str], heading_map: Dict[str, List[str]]) -> Dict[str, int]:
+    """Return {canonical_section: line_index_of_heading} in document order."""
+    found: Dict[str, int] = {}
+    for i, ln in enumerate(lines):
+        canon = is_heading(ln, heading_map)
+        if canon and canon not in found:
+            found[canon] = i
+    return found
+
+
+def extract_bullets(lines: List[str]) -> List[str]:
+    bullets = []
+    for ln in lines:
+        m = BULLET_RE.match(ln)
+        if m:
+            b = m.group(1).strip()
+            if len(b) > 3:
+                bullets.append(b)
+    # Fallback: if no bullet glyphs found, treat lines under experience/projects
+    # that look like achievements (verb-led, > 5 words) as bullets.
+    if not bullets:
+        for ln in lines:
+            words = ln.split()
+            if 5 <= len(words) <= 40 and words[0][0:1].isalpha():
+                if words[0].lower().rstrip("s,.") in {v.rstrip("s") for v in PB.STRONG_VERBS} \
+                   or ln.lower().startswith(tuple(PB.WEAK_STARTERS)):
+                    bullets.append(ln.strip())
+    return bullets
+
+
+def section_text(lines: List[str], sections: Dict[str, int], canon: str) -> Optional[str]:
+    if canon not in sections:
+        return None
+    start = sections[canon]
+    after = [idx for name, idx in sections.items() if idx > start]
+    end = min(after) if after else len(lines)
+    return "\n".join(lines[start:end]).lower()
+
+
 class ParsedResume:
     def __init__(self, ex: ExtractedResume):
         self.ex = ex
         self.text = ex.raw_text
         self.lower = ex.raw_text.lower()
         self.lines = ex.lines
-        self.sections = self._detect_sections()
-        self.bullets = self._extract_bullets()
+        self.sections = detect_sections(self.lines, PB.STANDARD_HEADINGS)
+        self.bullets = extract_bullets(self.lines)
         self.emails = EMAIL_RE.findall(self.text)
         self.links = {
             "linkedin": (LINKEDIN_RE.search(self.text) or [None]) and
                         (LINKEDIN_RE.search(self.text).group(0) if LINKEDIN_RE.search(self.text) else None),
             "github": (GITHUB_RE.search(self.text).group(0) if GITHUB_RE.search(self.text) else None),
         }
-
-    def _is_heading(self, line: str) -> Optional[str]:
-        s = line.strip().lower().strip(":").strip()
-        if len(s) > 40 or len(s.split()) > 5:
-            return None
-        for canon, variants in PB.STANDARD_HEADINGS.items():
-            for v in variants:
-                if s == v or s.startswith(v):
-                    return canon
-        return None
-
-    def _detect_sections(self) -> Dict[str, int]:
-        """Return {canonical_section: line_index_of_heading} in document order."""
-        found: Dict[str, int] = {}
-        for i, ln in enumerate(self.lines):
-            canon = self._is_heading(ln)
-            if canon and canon not in found:
-                found[canon] = i
-        return found
-
-    def _extract_bullets(self) -> List[str]:
-        bullets = []
-        for ln in self.lines:
-            m = BULLET_RE.match(ln)
-            if m:
-                b = m.group(1).strip()
-                if len(b) > 3:
-                    bullets.append(b)
-        # Fallback: if no bullet glyphs found, treat lines under experience/projects
-        # that look like achievements (verb-led, > 5 words) as bullets.
-        if not bullets:
-            for ln in self.lines:
-                words = ln.split()
-                if 5 <= len(words) <= 40 and words[0][0:1].isalpha():
-                    if words[0].lower().rstrip("s,.") in {v.rstrip("s") for v in PB.STRONG_VERBS} \
-                       or ln.lower().startswith(tuple(PB.WEAK_STARTERS)):
-                        bullets.append(ln.strip())
-        return bullets
 
 
 # ---------------------------------------------------------------------------
@@ -541,13 +557,7 @@ class DiagnosticEngine:
 
     # -- helpers -----------------------------------------------------------
     def _section_text(self, canon: str) -> Optional[str]:
-        if canon not in self.p.sections:
-            return None
-        start = self.p.sections[canon]
-        # find next heading after start
-        after = [idx for name, idx in self.p.sections.items() if idx > start]
-        end = min(after) if after else len(self.p.lines)
-        return "\n".join(self.p.lines[start:end]).lower()
+        return section_text(self.p.lines, self.p.sections, canon)
 
     def _fix(self, category, title, description, location="", why="", original="", fix=""):
         return {

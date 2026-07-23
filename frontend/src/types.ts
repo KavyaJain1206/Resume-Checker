@@ -69,3 +69,41 @@ export interface CandidateSummary {
   atsRiskLevel: string;
   recruiter7SecScan: string;
 }
+
+export type Confidence = "Verified" | "Estimated" | "Unknown";
+
+export interface JdCategoryScores {
+  keywordMatch: number;
+  skillsMatch: number;
+  educationMatch: number;
+  experienceMatch: number;
+  certificationMatch: number;
+}
+
+export interface JdMatchResult {
+  jdMatchScore: number;
+  resumeAtsScore: number;
+  finalRecommendation: "Strong Match" | "Moderate Match" | "Weak Match";
+  categoryScores: JdCategoryScores;
+  categoryDetails: Record<keyof JdCategoryScores, string>;
+  confidence: {
+    experienceMatch: Confidence;
+    educationMatch: Confidence;
+    certificationMatch: Confidence;
+  };
+  strengths: string[];
+  weaknesses: string[];
+  criticalFixes: FixItem[];
+  importantTweaks: FixItem[];
+  missingKeywords: string[];
+  missingSkills: string[];
+  atsRisks: string[];
+  recruiterView: string;
+  topImprovements: string[];
+  meta: {
+    resumeFileName: string;
+    jdFileName: string;
+    requiredExperienceYears?: number;
+    estimatedExperienceYears?: number;
+  };
+}

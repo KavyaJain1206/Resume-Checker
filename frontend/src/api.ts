@@ -1,4 +1,4 @@
-import type { AuditResult, CandidateSummary } from "./types";
+import type { AuditResult, CandidateSummary, JdMatchResult } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -32,6 +32,35 @@ export async function runAudit(form: FormData): Promise<{ id: string; auditResul
       console.error("[runAudit] non-JSON error response", { status: r.status, bodyText, parseErr });
     }
     console.error(`[runAudit] server responded ${r.status}:`, detail);
+    throw new Error(detail);
+  }
+  return r.json();
+}
+
+export async function runJdMatch(form: FormData): Promise<{ jdMatchResult: JdMatchResult }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
+  let r: Response;
+  try {
+    r = await fetch(`${BASE}/api/jd-match`, { method: "POST", body: form, signal: controller.signal });
+  } catch (err: any) {
+    console.error("[runJdMatch] fetch() rejected before a response was received:", err);
+    if (err?.name === "AbortError") {
+      throw new Error("Analysis timed out — check your connection and try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!r.ok) {
+    const bodyText = await r.text();
+    let detail = "JD match failed";
+    try {
+      detail = JSON.parse(bodyText).detail || detail;
+    } catch (parseErr) {
+      console.error("[runJdMatch] non-JSON error response", { status: r.status, bodyText, parseErr });
+    }
+    console.error(`[runJdMatch] server responded ${r.status}:`, detail);
     throw new Error(detail);
   }
   return r.json();

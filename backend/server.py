@@ -5,6 +5,7 @@ Endpoints
   GET  /api/roles                       -> target roles + experience levels
   POST /api/audit                       -> multipart (resume PDF + profile) -> audit + saves to Arsenal
   POST /api/audit/text                  -> JSON (pasted text + profile) -> audit only
+  POST /api/jd-match                    -> multipart (resume PDF + JD PDF) -> match report, stateless
   POST /api/admin/login                 -> placement-team login -> bearer token
   GET  /api/admin/candidates            -> Student Arsenal directory (auth)
   GET  /api/admin/candidates/{id}       -> single candidate record (auth)
@@ -37,7 +38,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import playbook as PB
 from config import settings
 from database import check_connection, get_session
-from pdf_extract import extract_from_text
+from jd_match_engine import analyze as run_jd_match
+from pdf_extract import extract_from_text, extract_resume
 from rule_engine import audit as run_rule_engine
 from services import CandidateService
 
@@ -190,6 +192,30 @@ async def run_audit_text(body: TextAuditBody):
     extracted = extract_from_text(body.resumeText)
     result = run_rule_engine(extracted, body.targetRole, body.experienceLevel, "pasted.txt")
     return {"auditResult": result}
+
+
+@app.post("/api/jd-match")
+async def jd_match(
+    resumeFile: UploadFile = File(...),
+    jdFile: UploadFile = File(...),
+):
+    resume_bytes = await resumeFile.read()
+    jd_bytes = await jdFile.read()
+    for label, data, upload in (("resume", resume_bytes, resumeFile), ("JD", jd_bytes, jdFile)):
+        if len(data) > settings.max_upload_bytes:
+            raise HTTPException(413, f"{label} file exceeds 5MB limit")
+        if not upload.filename.lower().endswith(".pdf"):
+            raise HTTPException(400, f"Only PDF files are accepted ({label})")
+
+    try:
+        resume_extracted = extract_resume(resume_bytes)
+        jd_extracted = extract_resume(jd_bytes)
+    except Exception as e:
+        logger.warning("Could not parse PDF(s) for JD match: %s", e)
+        raise HTTPException(422, f"Could not parse PDF: {e}")
+
+    result = run_jd_match(resume_extracted, jd_extracted, resumeFile.filename, jdFile.filename)
+    return {"jdMatchResult": result}
 
 
 @app.post("/api/admin/login")

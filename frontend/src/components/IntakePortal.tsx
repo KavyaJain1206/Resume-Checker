@@ -3,10 +3,10 @@ import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Terminal, ArrowRight, ArrowUpRight, ShieldCheck, Zap, ListChecks,
-  UploadCloud, ClipboardList, FileText, ChevronDown, X, Loader2,
+  UploadCloud, ClipboardList, FileText, ChevronDown, X, Loader2, FileSearch,
 } from "lucide-react";
-import { getRoles, runAudit } from "../api";
-import type { AuditResult, Profile } from "../types";
+import { getRoles, runAudit, runJdMatch } from "../api";
+import type { AuditResult, JdMatchResult, Profile } from "../types";
 
 const FALLBACK_ROLES = [
   "Frontend Developer", "Backend Developer", "Full Stack Developer",
@@ -23,17 +23,18 @@ const emptyProfile: Profile = {
 
 export default function IntakePortal({
   onComplete,
+  onJdComplete,
 }: {
   onComplete: (r: AuditResult, p: Profile) => void;
+  onJdComplete: (r: JdMatchResult) => void;
 }) {
   const [roles, setRoles] = useState<string[]>(FALLBACK_ROLES);
-  const [mode, setMode] = useState<"upload" | "form">("upload");
+  const [mode, setMode] = useState<"upload" | "form" | "jdMatch">("upload");
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [file, setFile] = useState<File | null>(null);
-  const [drag, setDrag] = useState(false);
+  const [jdFile, setJdFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getRoles().then((d) => setRoles(d.roles)).catch(() => {});
@@ -42,25 +43,50 @@ export default function IntakePortal({
   const set = (k: keyof Profile, v: string) =>
     setProfile((p) => ({ ...p, [k]: v }));
 
+  function validatePdf(f: File | null): boolean {
+    if (!f) return false;
+    if (!f.name.toLowerCase().endsWith(".pdf")) { setError("Please upload a PDF file."); return false; }
+    if (f.size > 5 * 1024 * 1024) { setError("File exceeds the 5MB limit."); return false; }
+    return true;
+  }
+
   function pickFile(f: File | null) {
     setError("");
-    if (!f) return;
-    if (!f.name.toLowerCase().endsWith(".pdf")) return setError("Please upload a PDF file.");
-    if (f.size > 5 * 1024 * 1024) return setError("File exceeds the 5MB limit.");
-    setFile(f);
+    if (validatePdf(f)) setFile(f);
+  }
+
+  function pickJdFile(f: File | null) {
+    setError("");
+    if (validatePdf(f)) setJdFile(f);
   }
 
   async function submit() {
     setError("");
-    if (!file) return setError("Attach your resume PDF to run the diagnostic.");
-    if (mode === "form" && !profile.fullName)
-      return setError("Enter your name for the tailored audit.");
+    if (mode === "jdMatch") {
+      if (!file) return setError("Attach your resume PDF to compare.");
+      if (!jdFile) return setError("Attach the job description PDF to compare.");
+    } else {
+      if (!file) return setError("Attach your resume PDF to run the diagnostic.");
+      if (mode === "form" && !profile.fullName)
+        return setError("Enter your name for the tailored audit.");
+    }
     setLoading(true);
     const MIN_LOADING_MS = 2500;
     const started = Date.now();
     try {
+      if (mode === "jdMatch") {
+        const fd = new FormData();
+        fd.append("resumeFile", file as File);
+        fd.append("jdFile", jdFile as File);
+        const { jdMatchResult } = await runJdMatch(fd);
+        const remaining = MIN_LOADING_MS - (Date.now() - started);
+        if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+        onJdComplete(jdMatchResult);
+        return;
+      }
+
       const fd = new FormData();
-      fd.append("resumeFile", file);
+      fd.append("resumeFile", file as File);
       fd.append("targetRole", profile.targetRole);
       fd.append("experienceLevel", profile.experienceLevel);
       (["fullName", "email", "phone", "location", "college", "degree", "branch",
@@ -72,7 +98,7 @@ export default function IntakePortal({
       if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
       onComplete(auditResult, profile);
     } catch (e: any) {
-      console.error("[IntakePortal.submit] audit request failed:", e);
+      console.error("[IntakePortal.submit] request failed:", e);
       const remaining = MIN_LOADING_MS - (Date.now() - started);
       if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
       setError(e?.message || "Something went wrong. Is the backend running?");
@@ -141,47 +167,53 @@ export default function IntakePortal({
             <p className="mono-label">Step 01 / Intake</p>
             <h2 className="text-4xl lg:text-5xl font-900 tracking-tight mt-1">FEED THE MACHINE</h2>
           </div>
-          <span className="mono-label mt-2">// Two ways in</span>
+          <span className="mono-label mt-2">// Three ways in</span>
         </div>
 
         {/* mode toggle */}
-        <div className="grid grid-cols-2 gap-3 mt-7">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-7">
           <ModeCard active={mode === "upload"} onClick={() => setMode("upload")}
             icon={UploadCloud} title="JUST UPLOAD" sub="Drop the PDF. We parse your details." />
           <ModeCard active={mode === "form"} onClick={() => setMode("form")}
             icon={ClipboardList} title="FILL QUICK FORM" sub="Type the basics for tighter tailoring." />
+          <ModeCard active={mode === "jdMatch"} onClick={() => setMode("jdMatch")}
+            icon={FileSearch} title="COMPARE TO A JD" sub="See how your resume matches a specific job." />
         </div>
 
-        {/* target role */}
-        <Field label="Target Position" className="mt-8">
-          <div className="relative">
-            <select
-              aria-label="Target Position"
-              value={profile.targetRole}
-              onChange={(e) => set("targetRole", e.target.value)}
-              className="w-full appearance-none border-b-2 border-ink bg-transparent py-3 pr-8 text-lg font-600 focus:outline-none"
-            >
-              {roles.map((r) => <option key={r}>{r}</option>)}
-            </select>
-            <ChevronDown size={18} className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-smoke" />
-          </div>
-          <p className="mt-2 text-xs text-smoke">Uses the Playbook's canonical keyword benchmark for that role.</p>
-        </Field>
+        {mode !== "jdMatch" && (
+          <>
+            {/* target role */}
+            <Field label="Target Position" className="mt-8">
+              <div className="relative">
+                <select
+                  aria-label="Target Position"
+                  value={profile.targetRole}
+                  onChange={(e) => set("targetRole", e.target.value)}
+                  className="w-full appearance-none border-b-2 border-ink bg-transparent py-3 pr-8 text-lg font-600 focus:outline-none"
+                >
+                  {roles.map((r) => <option key={r}>{r}</option>)}
+                </select>
+                <ChevronDown size={18} className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-smoke" />
+              </div>
+              <p className="mt-2 text-xs text-smoke">Uses the Playbook's canonical keyword benchmark for that role.</p>
+            </Field>
 
-        {/* experience level */}
-        <Field label="Experience Level" className="mt-7">
-          <div role="group" aria-label="Experience Level" className="grid grid-cols-2 sm:grid-cols-4 border border-ink">
-            {LEVELS.map((lv) => (
-              <button key={lv} onClick={() => set("experienceLevel", lv)}
-                aria-pressed={profile.experienceLevel === lv}
-                className={`py-3 text-xs font-700 tracking-wide border-ink transition-colors ${
-                  profile.experienceLevel === lv ? "bg-flame text-white" : "bg-white hover:bg-paper"
-                } [&:not(:last-child)]:border-r`}>
-                {lv.toUpperCase()}
-              </button>
-            ))}
-          </div>
-        </Field>
+            {/* experience level */}
+            <Field label="Experience Level" className="mt-7">
+              <div role="group" aria-label="Experience Level" className="grid grid-cols-2 sm:grid-cols-4 border border-ink">
+                {LEVELS.map((lv) => (
+                  <button key={lv} onClick={() => set("experienceLevel", lv)}
+                    aria-pressed={profile.experienceLevel === lv}
+                    className={`py-3 text-xs font-700 tracking-wide border-ink transition-colors ${
+                      profile.experienceLevel === lv ? "bg-flame text-white" : "bg-white hover:bg-paper"
+                    } [&:not(:last-child)]:border-r`}>
+                    {lv.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </>
+        )}
 
         {/* quick form fields */}
         <AnimatePresence>
@@ -207,36 +239,17 @@ export default function IntakePortal({
           )}
         </AnimatePresence>
 
-        {/* dropzone */}
-        <div className="mt-8">
-          <input ref={inputRef} type="file" accept="application/pdf" hidden
-            onChange={(e) => pickFile(e.target.files?.[0] || null)} />
-          {!file ? (
-            <button
-              onClick={() => inputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-              onDragLeave={() => setDrag(false)}
-              onDrop={(e) => { e.preventDefault(); setDrag(false); pickFile(e.dataTransfer.files?.[0] || null); }}
-              className={`w-full border-2 border-dashed py-14 flex flex-col items-center gap-2 transition-colors ${
-                drag ? "border-flame bg-flame/5" : "border-ink/30 hover:border-ink"
-              }`}>
-              <UploadCloud size={30} className="text-flame" />
-              <span className="font-600">Drop your resume PDF here</span>
-              <span className="text-xs text-smoke">or click to browse — max 5MB</span>
-            </button>
-          ) : (
-            <div className="flex items-center justify-between border-2 border-ink bg-white px-4 py-4">
-              <div className="flex items-center gap-3">
-                <FileText className="text-flame" />
-                <div>
-                  <div className="font-600 text-sm">{file.name}</div>
-                  <div className="text-xs text-smoke">{(file.size / 1024).toFixed(0)} KB · PDF</div>
-                </div>
-              </div>
-              <button onClick={() => setFile(null)} className="text-smoke hover:text-ink"><X size={18} /></button>
-            </div>
-          )}
-        </div>
+        {/* dropzone(s) */}
+        {mode === "jdMatch" ? (
+          <div className="mt-8 space-y-4">
+            <Dropzone label="Resume PDF" file={file} onPick={pickFile} onClear={() => setFile(null)} />
+            <Dropzone label="Job Description PDF" file={jdFile} onPick={pickJdFile} onClear={() => setJdFile(null)} />
+          </div>
+        ) : (
+          <div className="mt-8">
+            <Dropzone file={file} onPick={pickFile} onClear={() => setFile(null)} />
+          </div>
+        )}
 
         {error && <p className="mt-4 text-sm text-flame font-600">{error}</p>}
 
@@ -248,7 +261,9 @@ export default function IntakePortal({
           {!loading && <ArrowRight size={18} />}
         </button>
         <p className="mt-4 mb-10 text-[11px] text-smoke leading-relaxed">
-          Your profile and resume are saved to the placement team's Student Arsenal for review.
+          {mode === "jdMatch"
+            ? "This comparison runs instantly and is not saved anywhere."
+            : "Your profile and resume are saved to the placement team's Student Arsenal for review."}
         </p>
       </main>
     </div>
@@ -266,6 +281,45 @@ function ModeCard({ active, onClick, icon: Icon, title, sub }: any) {
       </div>
       <p className={`text-xs mt-1 ${active ? "text-white/85" : "text-smoke"}`}>{sub}</p>
     </button>
+  );
+}
+
+function Dropzone({ label, file, onPick, onClear }: {
+  label?: string; file: File | null; onPick: (f: File | null) => void; onClear: () => void;
+}) {
+  const [drag, setDrag] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div>
+      {label && <p className="mono-label mb-2">{label}</p>}
+      <input ref={inputRef} type="file" accept="application/pdf" hidden
+        onChange={(e) => onPick(e.target.files?.[0] || null)} />
+      {!file ? (
+        <button type="button"
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); onPick(e.dataTransfer.files?.[0] || null); }}
+          className={`w-full border-2 border-dashed py-14 flex flex-col items-center gap-2 transition-colors ${
+            drag ? "border-flame bg-flame/5" : "border-ink/30 hover:border-ink"
+          }`}>
+          <UploadCloud size={30} className="text-flame" />
+          <span className="font-600">Drop your {label ? label : "resume PDF"} here</span>
+          <span className="text-xs text-smoke">or click to browse — max 5MB</span>
+        </button>
+      ) : (
+        <div className="flex items-center justify-between border-2 border-ink bg-white px-4 py-4">
+          <div className="flex items-center gap-3">
+            <FileText className="text-flame" />
+            <div>
+              <div className="font-600 text-sm">{file.name}</div>
+              <div className="text-xs text-smoke">{(file.size / 1024).toFixed(0)} KB · PDF</div>
+            </div>
+          </div>
+          <button type="button" onClick={onClear} className="text-smoke hover:text-ink"><X size={18} /></button>
+        </div>
+      )}
+    </div>
   );
 }
 
