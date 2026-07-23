@@ -9,6 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
@@ -27,9 +28,13 @@ class Settings(BaseSettings):
     database_echo: bool = False
 
     # --- admin auth ------------------------------------------------------
-    admin_email: str = "admin@placement.team"
-    admin_password: str = "playbook2026"
-    secret_key: str = "change-me-in-prod"
+    # No fallback defaults: these are real credentials and must come from
+    # the environment. A missing value fails startup loudly (see
+    # get_settings() below) rather than silently running with a known,
+    # publicly-documented default.
+    admin_email: str
+    admin_password: str
+    secret_key: str
     token_ttl_seconds: int = 24 * 3600
 
     # --- http / cors ------------------------------------------------------
@@ -66,7 +71,17 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    try:
+        return Settings()
+    except ValidationError as e:
+        missing = [str(err["loc"][0]).upper() for err in e.errors() if err["type"] == "missing"]
+        if missing:
+            raise RuntimeError(
+                f"Missing required environment variable(s): {', '.join(missing)}. "
+                f"Set them in backend/.env (see backend/.env.example) or in the process "
+                f"environment before starting the app."
+            ) from None
+        raise
 
 
 settings = get_settings()

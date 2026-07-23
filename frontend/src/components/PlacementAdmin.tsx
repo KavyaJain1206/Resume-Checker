@@ -62,7 +62,7 @@ function LoginGate({ onAuth }: { onAuth: (t: string) => void }) {
           <Lock size={15} /> {busy ? "SIGNING IN…" : "SIGN IN"}
         </button>
         <p className="text-[11px] text-smoke mt-4 text-center">
-          Demo: admin@placement.team / playbook2026 · Sessions expire after 24 hours.
+          Contact your administrator for login credentials. Sessions expire after 24 hours.
         </p>
       </motion.form>
     </div>
