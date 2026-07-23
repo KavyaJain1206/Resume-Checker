@@ -6,7 +6,7 @@ import {
   FolderGit2, UserCheck, ScanLine, FileText, AlertTriangle, TriangleAlert,
   CheckCircle2, ArrowDownRight, ArrowUpRight, GraduationCap, Briefcase, Award,
 } from "lucide-react";
-import type { AuditResult, Profile, FixItem, CategoryScores, JdMatchResult, JdCategoryScores } from "../types";
+import type { AuditResult, Profile, FixItem, CategoryScores, JdMatchResult, JdCategoryScores, ScoreBreakdownItem } from "../types";
 
 const CAT_META: { key: keyof CategoryScores; label: string; icon: any }[] = [
   { key: "atsSafety", label: "ATS Safety", icon: ShieldCheck },
@@ -200,12 +200,27 @@ const JD_CAT_META: { key: keyof JdCategoryScores; label: string; icon: any }[] =
   { key: "educationMatch", label: "Education Match", icon: GraduationCap },
   { key: "experienceMatch", label: "Experience Match", icon: Briefcase },
   { key: "certificationMatch", label: "Certification Match", icon: Award },
+  { key: "responsibilitiesMatch", label: "Responsibilities", icon: LayoutList },
+  { key: "projectsMatch", label: "Projects Match", icon: FolderGit2 },
+];
+
+const JD_SCORE_META: { key: keyof JdMatchResult["scoreBreakdown"]; label: string; icon: any }[] = [
+  { key: "overallMatch", label: "Overall Match", icon: Target },
+  { key: "resumeAtsScore", label: "Resume ATS Score", icon: ShieldCheck },
+  { key: "keywordMatch", label: "Keyword Match", icon: Target },
+  { key: "skillsMatch", label: "Skills Match", icon: ScanLine },
+  { key: "educationMatch", label: "Education Match", icon: GraduationCap },
+  { key: "experienceMatch", label: "Experience Match", icon: Briefcase },
+  { key: "certificationMatch", label: "Certification Match", icon: Award },
+  { key: "responsibilitiesMatch", label: "Responsibilities", icon: LayoutList },
+  { key: "projectsMatch", label: "Projects Match", icon: FolderGit2 },
 ];
 
 export function JdScorecard({ result, onReset }: { result: JdMatchResult; onReset: () => void }) {
   const [tab, setTab] = useState<"critical" | "important" | "strengths">("critical");
   const jdScore = useCountUp(result.jdMatchScore);
   const atsScore = useCountUp(result.resumeAtsScore);
+  const overallScore = useCountUp(result.overallMatchScore ?? result.jdMatchScore);
   const good = result.finalRecommendation === "Strong Match";
   const warn = result.finalRecommendation === "Moderate Match";
 
@@ -256,9 +271,9 @@ export function JdScorecard({ result, onReset }: { result: JdMatchResult; onRese
 
           <div className="flex items-stretch gap-3">
             <div className="border-2 border-ink bg-white px-6 py-4 text-center min-w-[130px]">
-              <div className="mono-label !text-[0.58rem]">JD Match Score</div>
-              <div className="text-5xl font-900 leading-none mt-1" style={{ color: scoreColor(result.jdMatchScore) }}>
-                {jdScore}
+              <div className="mono-label !text-[0.58rem]">Overall Match</div>
+              <div className="text-5xl font-900 leading-none mt-1" style={{ color: scoreColor(result.overallMatchScore ?? result.jdMatchScore) }}>
+                {overallScore}
               </div>
               <div className="text-[0.6rem] text-smoke mt-1">/ 100</div>
             </div>
@@ -281,8 +296,9 @@ export function JdScorecard({ result, onReset }: { result: JdMatchResult; onRese
           <p className="mono-label mb-4">Category Breakdown</p>
           <div className="grid sm:grid-cols-2 gap-3">
             {JD_CAT_META.map((c, i) => {
-              const s = result.categoryScores[c.key];
-              const confidence = (result.confidence as any)[c.key] as string | undefined;
+              const s = result.categoryScores[c.key] ?? 0;
+              const breakdown = result.scoreBreakdown[c.key];
+              const confidence = breakdown?.confidence || (result.confidence as any)[c.key] as string | undefined;
               return (
                 <motion.div key={c.key} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
@@ -300,7 +316,29 @@ export function JdScorecard({ result, onReset }: { result: JdMatchResult; onRese
                       initial={{ width: 0 }} animate={{ width: `${s}%` }}
                       transition={{ delay: 0.2 + i * 0.05, duration: 0.7 }} />
                   </div>
-                  <p className="text-[0.68rem] text-smoke mt-2 leading-snug">{result.categoryDetails[c.key]}</p>
+                  <p className="text-[0.68rem] text-smoke mt-2 leading-snug">{result.categoryDetails[c.key] || breakdown?.reasonForDeductions || "No additional detail."}</p>
+                </motion.div>
+              );
+            })}
+          </div>
+
+          <p className="mono-label mt-8 mb-3">Score Details</p>
+          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            {JD_SCORE_META.map((item, i) => {
+              const breakdown = result.scoreBreakdown[item.key] as ScoreBreakdownItem;
+              return (
+                <motion.div key={item.key} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.05 * i }}
+                  className="border border-ink/15 bg-white p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <item.icon size={16} className="text-flame" />
+                    <span className="text-2xl font-900" style={{ color: scoreColor(breakdown.percentage) }}>{breakdown.percentage}</span>
+                  </div>
+                  <div className="mono-label !text-[0.58rem] mt-3">{item.label}</div>
+                  <p className="text-[0.68rem] text-smoke mt-2 leading-snug">
+                    {breakdown.matchedCount} matched / {breakdown.totalCount} total · {breakdown.confidence}
+                  </p>
+                  <p className="text-[0.68rem] text-smoke mt-2 leading-snug">{breakdown.reasonForDeductions}</p>
                 </motion.div>
               );
             })}

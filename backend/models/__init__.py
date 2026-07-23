@@ -9,12 +9,14 @@ from models.audit_finding import AuditFinding
 from models.audit_result import AuditResult
 from models.candidate import Candidate
 from models.candidate_skill import CandidateSkill
+from models.jd_match_analysis import JdMatchAnalysis
 from models.resume_upload import ResumeUpload
 
 __all__ = [
     "Candidate",
     "CandidateSkill",
     "ResumeUpload",
+    "JdMatchAnalysis",
     "AuditResult",
     "AuditCategoryScore",
     "AuditFinding",

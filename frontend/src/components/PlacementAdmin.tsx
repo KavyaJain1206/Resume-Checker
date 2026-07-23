@@ -2,13 +2,17 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Lock, ArrowLeft, LogOut, Search, Terminal, Download } from "lucide-react";
-import { adminLogin, listCandidates, getCandidate, downloadResume, SessionExpiredError } from "../api";
-import type { CandidateSummary } from "../types";
+import {
+  adminLogin, listCandidates, getCandidate, downloadResume, SessionExpiredError,
+  listJdMatchAnalyses, getJdMatchAnalysis, downloadJdMatchFile,
+} from "../api";
+import type { CandidateSummary, JdMatchSummary, JdMatchDetail } from "../types";
 
 const TOKEN_KEY = "arsenal_token";
 
 export default function PlacementAdmin() {
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem(TOKEN_KEY));
+  const [view, setView] = useState<"candidates" | "jd">("candidates");
   const logout = () => { sessionStorage.removeItem(TOKEN_KEY); setToken(null); };
 
   if (!token) return <LoginGate onAuth={(t) => { sessionStorage.setItem(TOKEN_KEY, t); setToken(t); }} />;
@@ -16,7 +20,7 @@ export default function PlacementAdmin() {
   // token flips this component back to LoginGate above — an expired or
   // missing token always lands the user back on the login screen, never on
   // the protected endpoint itself.
-  return <Arsenal token={token} onLogout={logout} onSessionExpired={logout} />;
+  return <Arsenal token={token} view={view} onViewChange={setView} onLogout={logout} onSessionExpired={logout} />;
 }
 
 function LoginGate({ onAuth }: { onAuth: (t: string) => void }) {
@@ -74,10 +78,12 @@ function LoginGate({ onAuth }: { onAuth: (t: string) => void }) {
   );
 }
 
-function Arsenal({ token, onLogout, onSessionExpired }: {
-  token: string; onLogout: () => void; onSessionExpired: () => void;
+function Arsenal({ token, view, onViewChange, onLogout, onSessionExpired }: {
+  token: string; view: "candidates" | "jd"; onViewChange: (v: "candidates" | "jd") => void;
+  onLogout: () => void; onSessionExpired: () => void;
 }) {
   const [rows, setRows] = useState<CandidateSummary[]>([]);
+  const [jdRows, setJdRows] = useState<JdMatchSummary[]>([]);
   const [q, setQ] = useState("");
   const [err, setErr] = useState("");
   const [detail, setDetail] = useState<any | null>(null);
@@ -87,6 +93,10 @@ function Arsenal({ token, onLogout, onSessionExpired }: {
       if (e instanceof SessionExpiredError) return onSessionExpired();
       console.error("[Arsenal] listCandidates failed:", e);
       setErr("Could not load candidates. Is the backend running?");
+    });
+    listJdMatchAnalyses(token).then((d) => setJdRows(d.analyses)).catch((e) => {
+      if (e instanceof SessionExpiredError) return onSessionExpired();
+      console.error("[Arsenal] listJdMatchAnalyses failed:", e);
     });
   }, [token]);
 
@@ -98,8 +108,18 @@ function Arsenal({ token, onLogout, onSessionExpired }: {
     });
   }
 
+  function openJdMatch(id: string) {
+    getJdMatchAnalysis(token, id).then(setDetail).catch((e) => {
+      if (e instanceof SessionExpiredError) return onSessionExpired();
+      console.error("[Arsenal] getJdMatchAnalysis failed:", e);
+      setErr("Could not load JD match detail.");
+    });
+  }
+
   const filtered = rows.filter((r) =>
     [r.fullName, r.email, r.college, r.targetRole].join(" ").toLowerCase().includes(q.toLowerCase()));
+  const filteredJd = jdRows.filter((r) =>
+    [r.resumeFileName, r.jdFileName, r.finalRecommendation].join(" ").toLowerCase().includes(q.toLowerCase()));
 
   return (
     <div className="min-h-screen">
@@ -119,8 +139,14 @@ function Arsenal({ token, onLogout, onSessionExpired }: {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="mono-label">Candidate Directory</p>
-            <h1 className="text-4xl lg:text-5xl font-900 tracking-tight mt-1">THE STUDENT ARSENAL</h1>
-            <p className="text-sm text-smoke mt-2">{rows.length} audited candidate{rows.length === 1 ? "" : "s"} captured.</p>
+            <h1 className="text-4xl lg:text-5xl font-900 tracking-tight mt-1">
+              {view === "candidates" ? "THE STUDENT ARSENAL" : "JD MATCH ARCHIVE"}
+            </h1>
+            <p className="text-sm text-smoke mt-2">
+              {view === "candidates"
+                ? `${rows.length} audited candidate${rows.length === 1 ? "" : "s"} captured.`
+                : `${jdRows.length} JD match${jdRows.length === 1 ? "" : "es"} captured.`}
+            </p>
           </div>
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-smoke" />
@@ -130,52 +156,100 @@ function Arsenal({ token, onLogout, onSessionExpired }: {
           </div>
         </div>
 
+        <div className="mt-6 grid grid-cols-2 border border-ink">
+          <button
+            type="button"
+            onClick={() => { setErr(""); setDetail(null); onViewChange("candidates"); }}
+            className={`py-3 font-800 tracking-wide ${view === "candidates" ? "bg-ink text-white" : "bg-white hover:bg-paper"}`}
+          >
+            Candidate Arsenal
+          </button>
+          <button
+            type="button"
+            onClick={() => { setErr(""); setDetail(null); onViewChange("jd"); }}
+            className={`py-3 font-800 tracking-wide ${view === "jd" ? "bg-ink text-white" : "bg-white hover:bg-paper"}`}
+          >
+            JD Match Archive
+          </button>
+        </div>
+
         {err && <p className="text-flame mt-6">{err}</p>}
 
-        <div className="mt-6 border border-ink overflow-x-auto">
-          <table className="w-full text-sm min-w-[820px]">
-            <thead>
-              <tr className="bg-ink text-white text-left">
-                {["Name", "Target Role", "Level", "College", "Score", "ATS", "7-Sec", "Captured"].map((h) => (
-                  <th key={h} className="px-4 py-3 mono-label !text-white !text-[0.56rem]">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id} onClick={() => openCandidate(r.id)}
-                  className="border-t border-ink/10 hover:bg-paper cursor-pointer">
-                  <td className="px-4 py-3 font-600">
-                    {r.fullName}<div className="text-xs text-smoke font-400">{r.email}</div>
-                  </td>
-                  <td className="px-4 py-3">{r.targetRole}</td>
-                  <td className="px-4 py-3 text-xs">{r.experienceLevel}</td>
-                  <td className="px-4 py-3 text-xs">{r.college || "—"}</td>
-                  <td className="px-4 py-3 font-900" style={{ color: r.overallScore >= 75 ? "#16a34a" : r.overallScore >= 50 ? "#f97316" : "#dc2626" }}>
-                    {r.overallScore}
-                  </td>
-                  <td className="px-4 py-3"><Pill v={r.atsRiskLevel} good={r.atsRiskLevel === "LOW"} warn={r.atsRiskLevel === "MED"} /></td>
-                  <td className="px-4 py-3"><Pill v={r.recruiter7SecScan} good={r.recruiter7SecScan === "PASS"} /></td>
-                  <td className="px-4 py-3 text-xs text-smoke">{new Date(r.createdAt).toLocaleDateString()}</td>
+        {view === "candidates" ? (
+          <div className="mt-6 border border-ink overflow-x-auto">
+            <table className="w-full text-sm min-w-[820px]">
+              <thead>
+                <tr className="bg-ink text-white text-left">
+                  {["Name", "Target Role", "Level", "College", "Score", "ATS", "7-Sec", "Captured"].map((h) => (
+                    <th key={h} className="px-4 py-3 mono-label !text-white !text-[0.56rem]">{h}</th>
+                  ))}
                 </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-12 text-center text-smoke">
-                  No candidates yet. Run a diagnostic from the intake page to populate the Arsenal.
-                </td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map((r) => (
+                  <tr key={r.id} onClick={() => openCandidate(r.id)}
+                    className="border-t border-ink/10 hover:bg-paper cursor-pointer">
+                    <td className="px-4 py-3 font-600">
+                      {r.fullName}<div className="text-xs text-smoke font-400">{r.email}</div>
+                    </td>
+                    <td className="px-4 py-3">{r.targetRole}</td>
+                    <td className="px-4 py-3 text-xs">{r.experienceLevel}</td>
+                    <td className="px-4 py-3 text-xs">{r.college || "—"}</td>
+                    <td className="px-4 py-3 font-900" style={{ color: r.overallScore >= 75 ? "#16a34a" : r.overallScore >= 50 ? "#f97316" : "#dc2626" }}>
+                      {r.overallScore}
+                    </td>
+                    <td className="px-4 py-3"><Pill v={r.atsRiskLevel} good={r.atsRiskLevel === "LOW"} warn={r.atsRiskLevel === "MED"} /></td>
+                    <td className="px-4 py-3"><Pill v={r.recruiter7SecScan} good={r.recruiter7SecScan === "PASS"} /></td>
+                    <td className="px-4 py-3 text-xs text-smoke">{new Date(r.createdAt).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+                {filtered.length === 0 && (
+                  <tr><td colSpan={8} className="px-4 py-12 text-center text-smoke">
+                    No candidates yet. Run a diagnostic from the intake page to populate the Arsenal.
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="mt-6 border border-ink overflow-x-auto">
+            <table className="w-full text-sm min-w-[820px]">
+              <thead>
+                <tr className="bg-ink text-white text-left">
+                  {["Resume", "Job Description", "Match", "ATS", "Recommendation", "Captured"].map((h) => (
+                    <th key={h} className="px-4 py-3 mono-label !text-white !text-[0.56rem]">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredJd.map((r) => (
+                  <tr key={r.id} onClick={() => openJdMatch(r.id)}
+                    className="border-t border-ink/10 hover:bg-paper cursor-pointer">
+                    <td className="px-4 py-3 font-600">{r.resumeFileName}</td>
+                    <td className="px-4 py-3 text-xs">{r.jdFileName}</td>
+                    <td className="px-4 py-3 font-900" style={{ color: r.overallMatchScore >= 75 ? "#16a34a" : r.overallMatchScore >= 50 ? "#f97316" : "#dc2626" }}>
+                      {r.overallMatchScore}
+                    </td>
+                    <td className="px-4 py-3"><Pill v={`${r.resumeAtsScore}`} good={r.resumeAtsScore >= 80} warn={r.resumeAtsScore >= 55} /></td>
+                    <td className="px-4 py-3"><Pill v={r.finalRecommendation} good={r.finalRecommendation === "Strong Match"} warn={r.finalRecommendation === "Moderate Match"} /></td>
+                    <td className="px-4 py-3 text-xs text-smoke">{new Date(r.createdAt).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+                {filteredJd.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-12 text-center text-smoke">
+                    No JD matches yet. Run a comparison from the intake page to populate the archive.
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {detail && (
-        <DetailDrawer
-          rec={detail}
-          token={token}
-          onClose={() => setDetail(null)}
-          onSessionExpired={onSessionExpired}
-        />
+        view === "candidates"
+          ? <DetailDrawer rec={detail} token={token} onClose={() => setDetail(null)} onSessionExpired={onSessionExpired} />
+          : <JdDetailDrawer rec={detail} token={token} onClose={() => setDetail(null)} onSessionExpired={onSessionExpired} />
       )}
     </div>
   );
@@ -252,6 +326,79 @@ function DetailDrawer({ rec, token, onClose, onSessionExpired }: {
           <Download size={16} />
           {downloading ? "Downloading…" : `View original resume: ${rec.resumeArtifact?.fileName}`}
         </button>
+        {downloadErr && <p className="text-flame text-sm mt-2 text-center font-600">{downloadErr}</p>}
+      </motion.div>
+    </div>
+  );
+}
+
+function JdDetailDrawer({ rec, token, onClose, onSessionExpired }: {
+  rec: JdMatchDetail; token: string; onClose: () => void; onSessionExpired: () => void;
+}) {
+  const a = rec.analysis;
+  const [downloading, setDownloading] = useState<"resume" | "jd" | null>(null);
+  const [downloadErr, setDownloadErr] = useState("");
+
+  async function handleDownload(kind: "resume" | "jd") {
+    setDownloadErr("");
+    setDownloading(kind);
+    try {
+      await downloadJdMatchFile(token, rec.id, kind, kind === "resume" ? rec.resumeArtifact.fileName : rec.jdArtifact.fileName);
+    } catch (e) {
+      if (e instanceof SessionExpiredError) return onSessionExpired();
+      console.error("[JdDetailDrawer] download failed:", e);
+      setDownloadErr("Could not download file.");
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-ink/40 flex justify-end z-50" onClick={onClose}>
+      <motion.div initial={{ x: 400 }} animate={{ x: 0 }} onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg bg-white h-full overflow-y-auto border-l-4 border-flame p-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-900">JD Match</h2>
+          <button onClick={onClose} className="mono-label hover:text-flame">Close ✕</button>
+        </div>
+        <p className="text-sm text-smoke mt-1">{rec.resumeArtifact.fileName} · {new Date(rec.createdAt).toLocaleString()}</p>
+        <div className="grid grid-cols-3 gap-2 mt-4">
+          <Stat k="Overall" v={a.overallMatchScore} />
+          <Stat k="ATS" v={a.resumeAtsScore} />
+          <Stat k="Rec" v={a.finalRecommendation} />
+        </div>
+        <Section title="Files">
+          <KV k="Resume" v={rec.resumeArtifact.fileName} />
+          <KV k="JD" v={rec.jdArtifact.fileName} />
+        </Section>
+        <Section title="Scores">
+          {Object.entries(rec.scores).map(([k, v]) => (
+            <KV key={k} k={k} v={String(v ?? "—")} />
+          ))}
+        </Section>
+        <Section title="Analysis">
+          <p className="text-sm text-ink/80 leading-relaxed whitespace-pre-wrap">{JSON.stringify(a.scoreBreakdown, null, 2)}</p>
+        </Section>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => handleDownload("resume")}
+            disabled={downloading === "resume"}
+            className="flex items-center justify-center gap-2 text-center border-2 border-ink py-3 font-800 hover:bg-ink hover:text-white transition-colors disabled:opacity-60"
+          >
+            <Download size={16} />
+            {downloading === "resume" ? "Downloading…" : "Resume PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDownload("jd")}
+            disabled={downloading === "jd"}
+            className="flex items-center justify-center gap-2 text-center border-2 border-ink py-3 font-800 hover:bg-ink hover:text-white transition-colors disabled:opacity-60"
+          >
+            <Download size={16} />
+            {downloading === "jd" ? "Downloading…" : "JD PDF"}
+          </button>
+        </div>
         {downloadErr && <p className="text-flame text-sm mt-2 text-center font-600">{downloadErr}</p>}
       </motion.div>
     </div>

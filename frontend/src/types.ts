@@ -70,7 +70,54 @@ export interface CandidateSummary {
   recruiter7SecScan: string;
 }
 
+export interface JdMatchSummary {
+  id: string;
+  createdAt: string;
+  resumeFileName: string;
+  jdFileName: string;
+  overallMatchScore: number;
+  resumeAtsScore: number;
+  finalRecommendation: "Strong Match" | "Moderate Match" | "Weak Match";
+}
+
+export interface JdMatchDetail {
+  id: string;
+  createdAt: string;
+  resumeArtifact: {
+    fileName: string;
+    fileUrl: string;
+    storagePath: string;
+    rawExtractedText: string;
+  };
+  jdArtifact: {
+    fileName: string;
+    fileUrl: string;
+    storagePath: string;
+    rawExtractedText: string;
+  };
+  analysis: JdMatchResult & { overallMatchScore: number };
+  scores: {
+    overallMatchScore: number;
+    resumeAtsScore: number;
+    keywordMatchScore: number;
+    skillsMatchScore: number;
+    educationMatchScore: number;
+    experienceMatchScore: number;
+    certificationMatchScore: number;
+    responsibilitiesMatchScore: number;
+    projectsMatchScore?: number | null;
+  };
+}
+
 export type Confidence = "Verified" | "Estimated" | "Unknown";
+
+export interface ScoreBreakdownItem {
+  percentage: number;
+  matchedCount: number;
+  totalCount: number;
+  confidence: Confidence;
+  reasonForDeductions: string;
+}
 
 export interface JdCategoryScores {
   keywordMatch: number;
@@ -78,19 +125,39 @@ export interface JdCategoryScores {
   educationMatch: number;
   experienceMatch: number;
   certificationMatch: number;
+  responsibilitiesMatch?: number;
+  projectsMatch?: number;
+}
+
+export interface JdScoreBreakdown {
+  overallMatch: ScoreBreakdownItem;
+  resumeAtsScore: ScoreBreakdownItem;
+  keywordMatch: ScoreBreakdownItem;
+  skillsMatch: ScoreBreakdownItem;
+  educationMatch: ScoreBreakdownItem;
+  experienceMatch: ScoreBreakdownItem;
+  certificationMatch: ScoreBreakdownItem;
+  responsibilitiesMatch: ScoreBreakdownItem;
+  projectsMatch: ScoreBreakdownItem;
 }
 
 export interface JdMatchResult {
   jdMatchScore: number;
+  overallMatchScore: number;
   resumeAtsScore: number;
   finalRecommendation: "Strong Match" | "Moderate Match" | "Weak Match";
   categoryScores: JdCategoryScores;
   categoryDetails: Record<keyof JdCategoryScores, string>;
   confidence: {
+    keywordMatch?: Confidence;
+    skillsMatch?: Confidence;
     experienceMatch: Confidence;
     educationMatch: Confidence;
     certificationMatch: Confidence;
+    responsibilitiesMatch?: Confidence;
+    projectsMatch?: Confidence;
   };
+  scoreBreakdown: JdScoreBreakdown;
   strengths: string[];
   weaknesses: string[];
   criticalFixes: FixItem[];

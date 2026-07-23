@@ -1,4 +1,4 @@
-import type { AuditResult, CandidateSummary, JdMatchResult } from "./types";
+import type { AuditResult, CandidateSummary, JdMatchDetail, JdMatchResult, JdMatchSummary } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -110,6 +110,18 @@ export async function getCandidate(token: string, id: string): Promise<any> {
   return r.json();
 }
 
+export async function listJdMatchAnalyses(token: string): Promise<{ count: number; analyses: JdMatchSummary[] }> {
+  const r = await authFetch(token, "/api/admin/jd-match-analyses");
+  if (!r.ok) throw new Error("Could not load JD matches");
+  return r.json();
+}
+
+export async function getJdMatchAnalysis(token: string, id: string): Promise<JdMatchDetail> {
+  const r = await authFetch(token, `/api/admin/jd-match-analyses/${id}`);
+  if (!r.ok) throw new Error("Not found");
+  return r.json();
+}
+
 /** Fetches the resume PDF with the Bearer token attached and triggers a
  * client-side download via an object URL — never navigates the browser
  * to the protected URL directly (which can't carry an Authorization
@@ -122,6 +134,28 @@ export async function downloadResume(token: string, id: string, fileName: string
   const a = document.createElement("a");
   a.href = url;
   a.download = fileName || "resume.pdf";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadJdMatchFile(
+  token: string,
+  id: string,
+  kind: "resume" | "jd",
+  fileName: string,
+): Promise<void> {
+  const endpoint = kind === "resume"
+    ? `/api/admin/jd-match-resume/${id}`
+    : `/api/admin/jd-match-jd/${id}`;
+  const r = await authFetch(token, endpoint);
+  if (!r.ok) throw new Error("Could not download file");
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName || `${kind}.pdf`;
   document.body.appendChild(a);
   a.click();
   a.remove();

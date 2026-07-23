@@ -42,6 +42,7 @@ from jd_match_engine import analyze as run_jd_match
 from pdf_extract import extract_from_text, extract_resume
 from rule_engine import audit as run_rule_engine
 from services import CandidateService
+from services.jd_match_service import JdMatchService
 
 logging.basicConfig(
     level=settings.log_level,
@@ -104,6 +105,10 @@ async def require_admin(authorization: Optional[str] = Header(None)):
 
 def get_candidate_service(session: AsyncSession = Depends(get_session)) -> CandidateService:
     return CandidateService(session, settings.upload_dir_abs)
+
+
+def get_jd_match_service(session: AsyncSession = Depends(get_session)) -> JdMatchService:
+    return JdMatchService(session, settings.upload_dir_abs)
 
 
 # --- models ---------------------------------------------------------------
@@ -198,6 +203,7 @@ async def run_audit_text(body: TextAuditBody):
 async def jd_match(
     resumeFile: UploadFile = File(...),
     jdFile: UploadFile = File(...),
+    service: JdMatchService = Depends(get_jd_match_service),
 ):
     resume_bytes = await resumeFile.read()
     jd_bytes = await jdFile.read()
@@ -215,7 +221,66 @@ async def jd_match(
         raise HTTPException(422, f"Could not parse PDF: {e}")
 
     result = run_jd_match(resume_extracted, jd_extracted, resumeFile.filename, jdFile.filename)
+    await service.save_analysis(
+        resume_bytes=resume_bytes,
+        resume_file_name=resumeFile.filename,
+        resume_extracted=resume_extracted,
+        jd_bytes=jd_bytes,
+        jd_file_name=jdFile.filename,
+        jd_extracted=jd_extracted,
+        analysis={
+            **result,
+            "overallMatchScore": result.get("jdMatchScore", 0),
+        },
+    )
     return {"jdMatchResult": result}
+
+
+@app.get("/api/admin/jd-match-analyses")
+async def list_jd_match_analyses(
+    _: bool = Depends(require_admin),
+    service: JdMatchService = Depends(get_jd_match_service),
+):
+    analyses = await service.list_summaries()
+    return {"count": len(analyses), "analyses": analyses}
+
+
+@app.get("/api/admin/jd-match-analyses/{analysis_id}")
+async def get_jd_match_analysis(
+    analysis_id: uuid.UUID,
+    _: bool = Depends(require_admin),
+    service: JdMatchService = Depends(get_jd_match_service),
+):
+    rec = await service.get_detail(analysis_id)
+    if not rec:
+        raise HTTPException(404, "Not found")
+    return rec
+
+
+@app.get("/api/admin/jd-match-resume/{analysis_id}")
+async def get_jd_match_resume_file(
+    analysis_id: uuid.UUID,
+    _: bool = Depends(require_admin),
+    service: JdMatchService = Depends(get_jd_match_service),
+):
+    rec = await service.get_detail(analysis_id)
+    if not rec:
+        raise HTTPException(404, "Not found")
+    artifact = rec["resumeArtifact"]
+    return FileResponse(artifact["storagePath"], media_type="application/pdf", filename=artifact["fileName"])
+
+
+@app.get("/api/admin/jd-match-jd/{analysis_id}")
+async def get_jd_match_jd_file(
+    analysis_id: uuid.UUID,
+    _: bool = Depends(require_admin),
+    service: JdMatchService = Depends(get_jd_match_service),
+):
+    rec = await service.get_detail(analysis_id)
+    if not rec:
+        raise HTTPException(404, "Not found")
+    artifact = rec["jdArtifact"]
+    return FileResponse(artifact["storagePath"], media_type="application/pdf", filename=artifact["fileName"])
 
 
 @app.post("/api/admin/login")

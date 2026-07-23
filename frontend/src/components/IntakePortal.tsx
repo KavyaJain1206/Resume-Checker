@@ -111,16 +111,16 @@ export default function IntakePortal({
     <div className="min-h-screen w-full lg:grid lg:grid-cols-2">
       {/* ================= LEFT — EDITORIAL ================= */}
       <aside className="grid-bg relative flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-ink/10 px-7 py-8 lg:h-screen lg:sticky lg:top-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 mono-label !text-ink">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 mono-label !text-ink min-w-0">
             <Terminal size={16} className="text-flame" />
             RESUME_PLAYBOOK_2026
           </div>
-          <div className="flex items-center gap-4">
-            <Link to="/arsenal" className="mono-label hover:text-ink flex items-center gap-1 underline underline-offset-4 decoration-ink/30">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+            <Link to="/arsenal" className="mono-label hover:text-ink flex items-center gap-1 underline underline-offset-4 decoration-ink/30 whitespace-nowrap">
               Placement View <ArrowRight size={12} />
             </Link>
-            <span className="tag-rotate bg-flame text-white text-[10px] font-800 px-2 py-1 tracking-widest">
+            <span className="tag-rotate bg-flame text-white text-[10px] font-800 px-2 py-1 tracking-widest whitespace-nowrap">
               ISSUE 01 · 2026
             </span>
           </div>
@@ -257,12 +257,12 @@ export default function IntakePortal({
           onClick={submit} disabled={loading}
           className="mt-6 w-full bg-ink text-white py-5 font-800 tracking-wide flex items-center justify-center gap-3 hover:bg-flame transition-colors disabled:opacity-60">
           {loading && <Loader2 size={18} className="animate-spin" />}
-          {loading ? "RUNNING DIAGNOSTIC…" : "RUN DIAGNOSTIC"}
+          {loading ? "RUNNING DIAGNOSTIC…" : mode === "jdMatch" ? "RUN MATCH ANALYSIS" : "RUN DIAGNOSTIC"}
           {!loading && <ArrowRight size={18} />}
         </button>
         <p className="mt-4 mb-10 text-[11px] text-smoke leading-relaxed">
           {mode === "jdMatch"
-            ? "This comparison runs instantly and is not saved anywhere."
+            ? "This comparison is saved for admin review along with both PDFs and extracted text."
             : "Your profile and resume are saved to the placement team's Student Arsenal for review."}
         </p>
       </main>
