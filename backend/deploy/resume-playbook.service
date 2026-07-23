@@ -9,6 +9,7 @@ User=resume_playbook
 Group=resume_playbook
 WorkingDirectory=/opt/resume-playbook-diagnostic/backend
 EnvironmentFile=/opt/resume-playbook-diagnostic/backend/.env
+ExecStartPre=/opt/resume-playbook-diagnostic/backend/.venv/bin/alembic upgrade head
 
 # Plain multi-worker uvicorn is sufficient at this app's scale. If/when you
 # outgrow it, swap this for gunicorn -k uvicorn.workers.UvicornWorker for

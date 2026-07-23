@@ -32,6 +32,10 @@ sudo -u resume_playbook cp .env.example .env
 sudo -u resume_playbook .venv/bin/alembic upgrade head
 ```
 
+The systemd unit in `resume-playbook.service` also runs the same migration
+command before each start, so a fresh pull lands on the latest schema before
+the API accepts traffic.
+
 If you're cutting over from an existing JSON-store deployment, import its data once:
 
 ```bash
