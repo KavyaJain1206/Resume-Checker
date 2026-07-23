@@ -48,18 +48,53 @@ export async function adminLogin(email: string, password: string): Promise<strin
   return d.token as string;
 }
 
-export async function listCandidates(token: string): Promise<{ count: number; candidates: CandidateSummary[] }> {
-  const r = await fetch(`${BASE}/api/admin/candidates`, {
-    headers: { Authorization: `Bearer ${token}` },
+/** Thrown whenever an authenticated admin request comes back 401 — missing
+ * or expired token. Callers should catch this specifically and redirect to
+ * the login screen rather than showing a generic error. */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super("Session expired");
+    this.name = "SessionExpiredError";
+  }
+}
+
+/** Every admin request goes through here so the Bearer token and the
+ * 401 -> SessionExpiredError translation happen in exactly one place. */
+async function authFetch(token: string, path: string, init: RequestInit = {}): Promise<Response> {
+  const r = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: { ...(init.headers || {}), Authorization: `Bearer ${token}` },
   });
-  if (!r.ok) throw new Error("Session expired");
+  if (r.status === 401) throw new SessionExpiredError();
+  return r;
+}
+
+export async function listCandidates(token: string): Promise<{ count: number; candidates: CandidateSummary[] }> {
+  const r = await authFetch(token, "/api/admin/candidates");
+  if (!r.ok) throw new Error("Could not load candidates");
   return r.json();
 }
 
 export async function getCandidate(token: string, id: string): Promise<any> {
-  const r = await fetch(`${BASE}/api/admin/candidates/${id}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const r = await authFetch(token, `/api/admin/candidates/${id}`);
   if (!r.ok) throw new Error("Not found");
   return r.json();
+}
+
+/** Fetches the resume PDF with the Bearer token attached and triggers a
+ * client-side download via an object URL — never navigates the browser
+ * to the protected URL directly (which can't carry an Authorization
+ * header and would 401). */
+export async function downloadResume(token: string, id: string, fileName: string): Promise<void> {
+  const r = await authFetch(token, `/api/admin/resume/${id}`);
+  if (!r.ok) throw new Error("Could not download resume");
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName || "resume.pdf";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }

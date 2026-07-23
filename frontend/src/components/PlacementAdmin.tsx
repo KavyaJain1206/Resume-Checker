@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Lock, ArrowLeft, LogOut, Search, Terminal } from "lucide-react";
-import { adminLogin, listCandidates, getCandidate } from "../api";
+import { Lock, ArrowLeft, LogOut, Search, Terminal, Download } from "lucide-react";
+import { adminLogin, listCandidates, getCandidate, downloadResume, SessionExpiredError } from "../api";
 import type { CandidateSummary } from "../types";
 
 const TOKEN_KEY = "arsenal_token";
 
 export default function PlacementAdmin() {
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem(TOKEN_KEY));
+  const logout = () => { sessionStorage.removeItem(TOKEN_KEY); setToken(null); };
 
   if (!token) return <LoginGate onAuth={(t) => { sessionStorage.setItem(TOKEN_KEY, t); setToken(t); }} />;
-  return <Arsenal token={token} onLogout={() => { sessionStorage.removeItem(TOKEN_KEY); setToken(null); }} />;
+  // onSessionExpired reuses the same reset as a manual sign-out: clearing the
+  // token flips this component back to LoginGate above — an expired or
+  // missing token always lands the user back on the login screen, never on
+  // the protected endpoint itself.
+  return <Arsenal token={token} onLogout={logout} onSessionExpired={logout} />;
 }
 
 function LoginGate({ onAuth }: { onAuth: (t: string) => void }) {
@@ -69,15 +74,29 @@ function LoginGate({ onAuth }: { onAuth: (t: string) => void }) {
   );
 }
 
-function Arsenal({ token, onLogout }: { token: string; onLogout: () => void }) {
+function Arsenal({ token, onLogout, onSessionExpired }: {
+  token: string; onLogout: () => void; onSessionExpired: () => void;
+}) {
   const [rows, setRows] = useState<CandidateSummary[]>([]);
   const [q, setQ] = useState("");
   const [err, setErr] = useState("");
   const [detail, setDetail] = useState<any | null>(null);
 
   useEffect(() => {
-    listCandidates(token).then((d) => setRows(d.candidates)).catch(() => setErr("Session expired. Sign in again."));
+    listCandidates(token).then((d) => setRows(d.candidates)).catch((e) => {
+      if (e instanceof SessionExpiredError) return onSessionExpired();
+      console.error("[Arsenal] listCandidates failed:", e);
+      setErr("Could not load candidates. Is the backend running?");
+    });
   }, [token]);
+
+  function openCandidate(id: string) {
+    getCandidate(token, id).then(setDetail).catch((e) => {
+      if (e instanceof SessionExpiredError) return onSessionExpired();
+      console.error("[Arsenal] getCandidate failed:", e);
+      setErr("Could not load candidate detail.");
+    });
+  }
 
   const filtered = rows.filter((r) =>
     [r.fullName, r.email, r.college, r.targetRole].join(" ").toLowerCase().includes(q.toLowerCase()));
@@ -124,7 +143,7 @@ function Arsenal({ token, onLogout }: { token: string; onLogout: () => void }) {
             </thead>
             <tbody>
               {filtered.map((r) => (
-                <tr key={r.id} onClick={() => getCandidate(token, r.id).then(setDetail)}
+                <tr key={r.id} onClick={() => openCandidate(r.id)}
                   className="border-t border-ink/10 hover:bg-paper cursor-pointer">
                   <td className="px-4 py-3 font-600">
                     {r.fullName}<div className="text-xs text-smoke font-400">{r.email}</div>
@@ -150,7 +169,14 @@ function Arsenal({ token, onLogout }: { token: string; onLogout: () => void }) {
         </div>
       </div>
 
-      {detail && <DetailDrawer rec={detail} onClose={() => setDetail(null)} />}
+      {detail && (
+        <DetailDrawer
+          rec={detail}
+          token={token}
+          onClose={() => setDetail(null)}
+          onSessionExpired={onSessionExpired}
+        />
+      )}
     </div>
   );
 }
@@ -160,8 +186,27 @@ function Pill({ v, good, warn }: { v: string; good?: boolean; warn?: boolean }) 
   return <span className="text-[0.62rem] font-700 border px-2 py-0.5" style={{ color: c, borderColor: c }}>{v}</span>;
 }
 
-function DetailDrawer({ rec, onClose }: { rec: any; onClose: () => void }) {
+function DetailDrawer({ rec, token, onClose, onSessionExpired }: {
+  rec: any; token: string; onClose: () => void; onSessionExpired: () => void;
+}) {
   const p = rec.profile, a = rec.auditResult;
+  const [downloading, setDownloading] = useState(false);
+  const [downloadErr, setDownloadErr] = useState("");
+
+  async function handleDownload() {
+    setDownloadErr("");
+    setDownloading(true);
+    try {
+      await downloadResume(token, rec.id, rec.resumeArtifact?.fileName || "resume.pdf");
+    } catch (e) {
+      if (e instanceof SessionExpiredError) return onSessionExpired();
+      console.error("[DetailDrawer] downloadResume failed:", e);
+      setDownloadErr("Could not download resume.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-ink/40 flex justify-end z-50" onClick={onClose}>
       <motion.div initial={{ x: 400 }} animate={{ x: 0 }} onClick={(e) => e.stopPropagation()}
@@ -198,9 +243,16 @@ function DetailDrawer({ rec, onClose }: { rec: any; onClose: () => void }) {
           ))}
           {a.criticalFixes.length === 0 && <span className="text-xs text-smoke">None 🎉</span>}
         </Section>
-        <a href={rec.resumeArtifact?.fileUrl} className="block text-center border-2 border-ink py-3 font-800 hover:bg-ink hover:text-white transition-colors">
-          View original resume: {rec.resumeArtifact?.fileName}
-        </a>
+        <button
+          type="button"
+          onClick={handleDownload}
+          disabled={downloading}
+          className="w-full flex items-center justify-center gap-2 text-center border-2 border-ink py-3 font-800 hover:bg-ink hover:text-white transition-colors disabled:opacity-60"
+        >
+          <Download size={16} />
+          {downloading ? "Downloading…" : `View original resume: ${rec.resumeArtifact?.fileName}`}
+        </button>
+        {downloadErr && <p className="text-flame text-sm mt-2 text-center font-600">{downloadErr}</p>}
       </motion.div>
     </div>
   );
