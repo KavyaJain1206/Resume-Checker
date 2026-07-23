@@ -148,6 +148,7 @@ export default function IntakePortal({
         <Field label="Target Position" className="mt-8">
           <div className="relative">
             <select
+              aria-label="Target Position"
               value={profile.targetRole}
               onChange={(e) => set("targetRole", e.target.value)}
               className="w-full appearance-none border-b-2 border-ink bg-transparent py-3 pr-8 text-lg font-600 focus:outline-none"
@@ -161,9 +162,10 @@ export default function IntakePortal({
 
         {/* experience level */}
         <Field label="Experience Level" className="mt-7">
-          <div className="grid grid-cols-2 sm:grid-cols-4 border border-ink">
+          <div role="group" aria-label="Experience Level" className="grid grid-cols-2 sm:grid-cols-4 border border-ink">
             {LEVELS.map((lv) => (
               <button key={lv} onClick={() => set("experienceLevel", lv)}
+                aria-pressed={profile.experienceLevel === lv}
                 className={`py-3 text-xs font-700 tracking-wide border-ink transition-colors ${
                   profile.experienceLevel === lv ? "bg-flame text-white" : "bg-white hover:bg-paper"
                 } [&:not(:last-child)]:border-r`}>

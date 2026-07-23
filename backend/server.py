@@ -22,6 +22,7 @@ from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import playbook as PB
@@ -41,7 +42,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 app = FastAPI(title="Resume Playbook Diagnostic API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
     allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 
@@ -143,7 +144,7 @@ async def run_audit(
 
     record = {
         "id": rec_id,
-        "createdAt": dt.datetime.utcnow().isoformat() + "Z",
+        "createdAt": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         "profile": {
             "fullName": fullName, "email": email, "phone": phone,
             "location": location, "college": college, "degree": degree,
@@ -202,6 +203,18 @@ async def get_candidate(rec_id: str, _: bool = Depends(require_admin)):
     if not rec:
         raise HTTPException(404, "Not found")
     return rec
+
+
+@app.get("/api/admin/resume/{rec_id}")
+async def get_resume_file(rec_id: str, _: bool = Depends(require_admin)):
+    rec = await STORE.get(rec_id)
+    if not rec:
+        raise HTTPException(404, "Not found")
+    path = os.path.join(UPLOAD_DIR, f"{rec_id}.pdf")
+    if not os.path.isfile(path):
+        raise HTTPException(404, "Resume file not found")
+    file_name = rec.get("resumeArtifact", {}).get("fileName", "resume.pdf")
+    return FileResponse(path, media_type="application/pdf", filename=file_name)
 
 
 if __name__ == "__main__":

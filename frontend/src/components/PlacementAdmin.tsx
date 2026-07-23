@@ -106,6 +106,7 @@ function Arsenal({ token, onLogout }: { token: string; onLogout: () => void }) {
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-smoke" />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, college, role…"
+              aria-label="Search candidates"
               className="border border-ink pl-9 pr-4 py-2.5 text-sm w-72 focus:outline-none focus:border-flame" />
           </div>
         </div>
