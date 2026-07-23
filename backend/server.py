@@ -159,22 +159,29 @@ async def run_audit(
         raise HTTPException(400, "Only PDF resumes are accepted")
 
     try:
-        candidate_id, result = await service.run_and_save_audit(
+        extracted, result = service.extract_and_audit(
             file_bytes=data,
             file_name=resumeFile.filename,
             target_role=targetRole,
             experience_level=experienceLevel,
-            profile={
-                "fullName": fullName, "email": email, "phone": phone,
-                "location": location, "college": college, "degree": degree,
-                "branch": branch, "gradYear": gradYear, "cgpa": cgpa,
-                "skills": skills, "linkedin": linkedin, "github": github,
-            },
         )
     except Exception as e:
-        logger.exception("Audit failed for upload %s", resumeFile.filename)
+        logger.warning("Could not parse PDF %s: %s", resumeFile.filename, e)
         raise HTTPException(422, f"Could not parse PDF: {e}")
 
+    candidate_id = await service.save_audit(
+        file_bytes=data,
+        file_name=resumeFile.filename,
+        extracted=extracted,
+        audit_result=result,
+        profile={
+            "fullName": fullName, "email": email, "phone": phone,
+            "location": location, "college": college, "degree": degree,
+            "branch": branch, "gradYear": gradYear, "cgpa": cgpa,
+            "targetRole": targetRole, "experienceLevel": experienceLevel,
+            "skills": skills, "linkedin": linkedin, "github": github,
+        },
+    )
     return {"id": str(candidate_id), "auditResult": result}
 
 

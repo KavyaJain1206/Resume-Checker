@@ -15,7 +15,9 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(BACKEND_ROOT / ".env"), env_file_encoding="utf-8", extra="ignore"
+    )
 
     # --- database ------------------------------------------------------
     database_url: str

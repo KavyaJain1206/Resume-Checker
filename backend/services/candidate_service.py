@@ -15,7 +15,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import AuditFinding, Candidate
-from pdf_extract import extract_from_text, extract_resume
+from pdf_extract import ExtractedResume, extract_from_text, extract_resume
 from repositories import CandidateRepository
 from rule_engine import audit as run_rule_engine
 
@@ -53,12 +53,19 @@ class CandidateService:
         self.upload_dir = upload_dir
         self.repo = CandidateRepository(session)
 
-    async def run_and_save_audit(
-        self, *, file_bytes: bytes, file_name: str, target_role: str, experience_level: str, profile: dict,
-    ) -> tuple[uuid.UUID, dict]:
+    def extract_and_audit(
+        self, *, file_bytes: bytes, file_name: str, target_role: str, experience_level: str,
+    ) -> tuple[ExtractedResume, dict]:
+        """PDF parsing + the pure rule engine. Raises on unparseable PDFs —
+        callers should catch this separately from save_audit() so a parse
+        failure (422) is never confused with a persistence failure (500)."""
         extracted = extract_resume(file_bytes)
         audit_result = run_rule_engine(extracted, target_role, experience_level, file_name)
+        return extracted, audit_result
 
+    async def save_audit(
+        self, *, file_bytes: bytes, file_name: str, extracted: ExtractedResume, audit_result: dict, profile: dict,
+    ) -> uuid.UUID:
         candidate_id = uuid.uuid4()
         os.makedirs(self.upload_dir, exist_ok=True)
         storage_path = os.path.join(self.upload_dir, f"{candidate_id}.pdf")
@@ -68,12 +75,12 @@ class CandidateService:
         skills = parse_skills(profile.get("skills", ""))
         await self.repo.create(
             candidate_id=candidate_id,
-            profile={**profile, "targetRole": target_role, "experienceLevel": experience_level},
+            profile=profile,
             skills=skills,
             resume={"fileName": file_name, "storagePath": storage_path, "rawExtractedText": extracted.raw_text},
             audit=audit_result,
         )
-        return candidate_id, audit_result
+        return candidate_id
 
     @staticmethod
     def run_text_audit(resume_text: str, target_role: str, experience_level: str) -> dict:

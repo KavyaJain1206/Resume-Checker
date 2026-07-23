@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Terminal, ArrowRight, ArrowUpRight, ShieldCheck, Zap, ListChecks,
-  UploadCloud, ClipboardList, FileText, ChevronDown, X,
+  UploadCloud, ClipboardList, FileText, ChevronDown, X, Loader2,
 } from "lucide-react";
 import { getRoles, runAudit } from "../api";
 import type { AuditResult, Profile } from "../types";
@@ -63,10 +63,16 @@ export default function IntakePortal({
     (["fullName", "email", "phone", "location", "college", "degree", "branch",
       "gradYear", "cgpa", "skills", "linkedin", "github"] as (keyof Profile)[])
       .forEach((k) => fd.append(k === "gradYear" ? "gradYear" : k, profile[k]));
+    const MIN_LOADING_MS = 2500;
+    const started = Date.now();
     try {
       const { auditResult } = await runAudit(fd);
+      const remaining = MIN_LOADING_MS - (Date.now() - started);
+      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
       onComplete(auditResult, profile);
     } catch (e: any) {
+      const remaining = MIN_LOADING_MS - (Date.now() - started);
+      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
       setError(e.message || "Something went wrong. Is the backend running?");
     } finally {
       setLoading(false);
@@ -235,6 +241,7 @@ export default function IntakePortal({
         <button
           onClick={submit} disabled={loading}
           className="mt-6 w-full bg-ink text-white py-5 font-800 tracking-wide flex items-center justify-center gap-3 hover:bg-flame transition-colors disabled:opacity-60">
+          {loading && <Loader2 size={18} className="animate-spin" />}
           {loading ? "RUNNING DIAGNOSTIC…" : "RUN DIAGNOSTIC"}
           {!loading && <ArrowRight size={18} />}
         </button>
