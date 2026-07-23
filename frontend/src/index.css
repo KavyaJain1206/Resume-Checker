@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #fafafa;
+  color: #171717;
+  font-family: "Montserrat", "Helvetica Neue", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* faint engineering grid used across the editorial layout */
+.grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(23, 23, 23, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(23, 23, 23, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.mono-label {
+  font-family: "Montserrat", monospace;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #737373;
+}
+
+.tag-rotate {
+  transform: rotate(-4deg);
+}
+
+/* thin scrollbar for the action feed */
+.feed::-webkit-scrollbar {
+  width: 8px;
+}
+.feed::-webkit-scrollbar-thumb {
+  background: #17171733;
+  border-radius: 0;
+}
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.marquee {
+  animation: marquee 22s linear infinite;
+}
